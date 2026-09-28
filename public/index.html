@@ -1,1 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEXUS C2 | Master Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-dark:#050914; --bg-card:#0a1128;
+  --neon-green:#10b981; --neon-blue:#3b82f6; --neon-red:#ef4444; --neon-amber:#f59e0b; --neon-purple:#8b5cf6;
+  --text-main:#e2e8f0; --text-muted:#64748b;
+  --border:#1e293b; --card-radius:12px;
+}
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Fira Code',monospace;}
+body{background:var(--bg-dark);color:var(--text-main);overflow-x:hidden;}
+.hidden{display:none!important;}
+.flex{display:flex;}.items-center{align-items:center;}.justify-between{justify-content:space-between;}
+.text-neon{color:var(--neon-green);text-shadow:0 0 10px rgba(16,185,129,.5);}
+.text-red{color:var(--neon-red);}.text-blue{color:var(--neon-blue);}.text-amber{color:var(--neon-amber);}.text-muted{color:var(--text-muted);}
 
+#loginScreen{height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at center,#0a1128 0%,#050914 100%);padding:1rem;}
+.login-box{background:rgba(10,17,40,.8);backdrop-filter:blur(10px);padding:2.5rem 2rem;border:1px solid var(--border);border-top:3px solid var(--neon-green);border-radius:var(--card-radius);box-shadow:0 10px 30px rgba(0,0,0,.5);width:100%;max-width:400px;text-align:center;}
+.input-group{margin-bottom:1.5rem;text-align:left;}
+.input-group label{display:block;font-size:.8rem;color:var(--text-muted);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:1px;}
+.custom-input{width:100%;padding:.9rem;background:rgba(0,0,0,.2);border:1px solid var(--border);color:#fff;border-radius:6px;outline:none;transition:.3s;font-size:1rem;}
+.custom-input:focus{border-color:var(--neon-green);box-shadow:0 0 8px rgba(16,185,129,.2);}
+.btn{width:100%;padding:.9rem;background:transparent;border:1px solid var(--border);color:var(--text-main);font-weight:600;border-radius:6px;cursor:pointer;transition:.3s;text-transform:uppercase;letter-spacing:1px;font-size:.9rem;display:inline-flex;align-items:center;justify-content:center;gap:8px;}
+.btn:hover{background:rgba(255,255,255,.05);}
+.btn-neon{border-color:var(--neon-green);color:var(--neon-green);}
+.btn-neon:hover{background:rgba(16,185,129,.1);box-shadow:0 0 15px rgba(16,185,129,.2);}
+.btn-red{border-color:var(--neon-red);color:var(--neon-red);}
+.btn-red:hover{background:rgba(239,68,68,.1);}
+.btn-blue{border-color:var(--neon-blue);color:var(--neon-blue);}
+.btn-blue:hover{background:rgba(59,130,246,.1);}
+.btn-amber{border-color:var(--neon-amber);color:var(--neon-amber);}
+
+#dashboardScreen{min-height:100vh;display:flex;flex-direction:column;}
+header{background:rgba(10,17,40,.95);padding:1rem 1.5rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:50;backdrop-filter:blur(10px);}
+main{flex:1;padding:1.5rem;max-width:1400px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:2rem;}
+.section-header{font-size:.85rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:2px;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:.5rem;display:flex;align-items:center;gap:8px;}
+
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1rem;}
+.stat-card{background:var(--bg-card);padding:1.2rem;border-radius:var(--card-radius);border:1px solid var(--border);position:relative;overflow:hidden;}
+.stat-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;}
+.stat-card.blue::before{background:var(--neon-blue);}
+.stat-card.red::before{background:var(--neon-red);}
+.stat-card.green::before{background:var(--neon-green);}
+.stat-card.amber::before{background:var(--neon-amber);}
+.stat-card.purple::before{background:var(--neon-purple);}
+.stat-title{font-size:.7rem;color:var(--text-muted);font-weight:500;letter-spacing:.5px;}
+.stat-value{font-size:1.8rem;font-weight:700;margin-top:.4rem;}
+
+.filter-bar{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;}
+.filter-bar .pill{padding:.5rem 1rem;border:1px solid var(--border);border-radius:20px;font-size:.75rem;cursor:pointer;color:var(--text-muted);background:transparent;transition:.2s;}
+.filter-bar .pill.active{background:rgba(16,185,129,.15);border-color:var(--neon-green);color:var(--neon-green);}
+.search-input{flex:1;min-width:200px;padding:.6rem 1rem;background:rgba(0,0,0,.2);border:1px solid var(--border);color:#fff;border-radius:6px;outline:none;font-size:.85rem;}
+
+.user-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1.5rem;}
+.user-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--card-radius);padding:1.2rem;transition:.3s;display:flex;flex-direction:column;gap:1rem;}
+.user-card:hover{border-color:var(--neon-blue);box-shadow:0 4px 20px rgba(0,0,0,.3);transform:translateY(-2px);}
+.user-card.status-SUSPENDED{border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.05);}
+.user-card.status-DISABLED{border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.05);}
+.user-card.status-REVOKED{border-color:rgba(139,92,246,.5);background:rgba(139,92,246,.05);}
+
+.card-header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px dashed var(--border);padding-bottom:.8rem;}
+.card-title{font-size:1.1rem;color:#fff;text-transform:uppercase;font-weight:600;display:flex;align-items:center;gap:8px;}
+
+.badge{font-size:.65rem;padding:.3rem .6rem;border-radius:20px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;}
+.badge.status-ACTIVE{background:rgba(16,185,129,.15);color:var(--neon-green);border:1px solid rgba(16,185,129,.3);}
+.badge.status-SUSPENDED{background:rgba(239,68,68,.15);color:var(--neon-red);border:1px solid rgba(239,68,68,.3);}
+.badge.status-DISABLED{background:rgba(245,158,11,.15);color:var(--neon-amber);border:1px solid rgba(245,158,11,.3);}
+.badge.status-REVOKED{background:rgba(139,92,246,.15);color:var(--neon-purple);border:1px solid rgba(139,92,246,.3);}
+.badge.online{background:rgba(16,185,129,.15);color:var(--neon-green);border:1px solid rgba(16,185,129,.3);}
+.badge.offline{background:rgba(100,116,139,.15);color:var(--text-muted);border:1px solid rgba(100,116,139,.3);}
+
+.card-info{display:flex;flex-direction:column;gap:.4rem;font-size:.8rem;}
+.info-row{display:flex;justify-content:space-between;gap:1rem;}
+.info-label{color:var(--text-muted);}
+.info-value{color:var(--text-main);font-weight:500;text-align:right;word-break:break-all;}
+.info-value.mono{font-size:.7rem;}
+
+.card-actions{display:grid;grid-template-columns:1fr 1fr;gap:.4rem;margin-top:.5rem;}
+.card-actions .btn{padding:.55rem;font-size:.7rem;border-radius:6px;}
+.card-actions .btn.full-width{grid-column:span 2;}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(5,9,20,.92);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(5px);padding:1rem;}
+.modal{background:var(--bg-card);padding:2rem;border-radius:var(--card-radius);border:1px solid var(--border);width:100%;max-width:520px;max-height:90vh;overflow-y:auto;animation:scaleUp .25s ease-out;box-shadow:0 20px 40px rgba(0,0,0,.6);}
+.modal.wide{max-width:720px;}
+.modal-title{font-size:1.1rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:1.5rem;border-bottom:1px solid var(--border);padding-bottom:1rem;display:flex;justify-content:space-between;align-items:center;}
+@keyframes scaleUp{from{transform:scale(.95);opacity:0;}to{transform:scale(1);opacity:1;}}
+
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;font-size:.85rem;}
+.detail-grid .label{color:var(--text-muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.2rem;}
+.detail-grid .value{color:var(--text-main);word-break:break-all;}
+
+.timeline{margin-top:1.5rem;border-left:2px solid var(--border);padding-left:1rem;}
+.timeline-item{padding:.5rem 0;font-size:.8rem;color:var(--text-muted);position:relative;}
+.timeline-item::before{content:'';position:absolute;left:-1.35rem;top:.85rem;width:8px;height:8px;border-radius:50%;background:var(--neon-blue);}
+.timeline-item .ts{color:var(--text-muted);font-size:.7rem;}
+.timeline-item .action{color:#fff;font-weight:600;}
+
+footer{text-align:center;padding:1.5rem;border-top:1px solid var(--border);font-size:.75rem;color:var(--text-muted);background:rgba(10,17,40,.5);}
+
+#toast{position:fixed;bottom:20px;right:20px;left:20px;max-width:400px;margin:0 auto;background:var(--bg-card);border-left:4px solid var(--neon-green);padding:1rem 1.5rem;border-radius:6px;box-shadow:0 10px 25px rgba(0,0,0,.5);z-index:1000;transform:translateY(150%);transition:transform .4s cubic-bezier(.175,.885,.32,1.275);display:flex;align-items:center;gap:10px;font-weight:500;}
+#toast.show{transform:translateY(0);}
+
+@media(max-width:600px){
+  header h2{font-size:1.2rem;}
+  .stats-grid{grid-template-columns:1fr 1fr;}
+  .card-actions{grid-template-columns:1fr;}
+  .card-actions .btn.full-width{grid-column:span 1;}
+  .detail-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<div id="toast">
+  <svg id="toastIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+  <span id="toastMsg">Message</span>
+</div>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <div class="login-box">
+    <h1 class="text-neon" style="margin-bottom:.5rem;font-size:2rem;">NEXUS<span style="font-weight:300;color:var(--text-main);">_C2</span></h1>
+    <p style="color:var(--text-muted);margin-bottom:2.5rem;font-size:.8rem;letter-spacing:1px;">SECURE ADMIN TERMINAL</p>
+    <form id="loginForm">
+      <div class="input-group"><label>ROOT ID</label><input type="text" id="adminUser" class="custom-input" required autocomplete="off" placeholder="Enter username"></div>
+      <div class="input-group"><label>PASSPHRASE</label><input type="password" id="adminPass" class="custom-input" required placeholder="Enter password"></div>
+      <button type="submit" class="btn btn-neon" id="btnLogin" style="margin-top:1rem;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
+        INITIALIZE SECURE LINK
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboardScreen" class="hidden">
+  <header>
+    <div class="flex items-center">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" style="margin-right:10px;"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+      <h2 class="text-neon" style="font-size:1.4rem;">NEXUS<span style="font-weight:300;color:var(--text-main);">_NODE</span></h2>
+    </div>
+    <button class="btn btn-red" style="width:auto;padding:.5rem 1rem;font-size:.8rem;" onclick="logout()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>DISCONNECT
+    </button>
+  </header>
+
+  <main>
+    <!-- OVERVIEW STATS -->
+    <section>
+      <div class="section-header">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line></svg>
+        System Overview
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card blue"><div class="stat-title">TOTAL ACCOUNTS</div><div class="stat-value text-blue" id="statTotal">0</div></div>
+        <div class="stat-card green"><div class="stat-title">ACTIVE</div><div class="stat-value text-neon" id="statActive">0</div></div>
+        <div class="stat-card red"><div class="stat-title">SUSPENDED</div><div class="stat-value text-red" id="statSuspended">0</div></div>
+        <div class="stat-card amber"><div class="stat-title">DISABLED</div><div class="stat-value text-amber" id="statDisabled">0</div></div>
+        <div class="stat-card green"><div class="stat-title">ONLINE</div><div class="stat-value text-neon" id="statOnline">0</div></div>
+        <div class="stat-card red"><div class="stat-title">OFFLINE</div><div class="stat-value text-red" id="statOffline">0</div></div>
+        <div class="stat-card purple"><div class="stat-title">ACTIVE SESSIONS</div><div class="stat-value" style="color:var(--neon-purple);" id="statSessions">0</div></div>
+        <div class="stat-card blue"><div class="stat-title">FCM CONNECTED</div><div class="stat-value text-blue" id="statFcm">0</div></div>
+      </div>
+    </section>
+
+    <!-- ACTIONS + FILTERS -->
+    <section>
+      <div class="section-header">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+        Actions &amp; Filters
+      </div>
+      <div class="filter-bar" style="margin-bottom:1rem;">
+        <button class="btn btn-neon" style="width:auto;padding:.6rem 1rem;" onclick="openModal('addUserModal')">+ NEW ACCOUNT</button>
+        <button class="btn" style="width:auto;padding:.6rem 1rem;" onclick="fetchUsers()">↻ REFRESH</button>
+        <button class="btn btn-blue" style="width:auto;padding:.6rem 1rem;" onclick="fetchAuditLog()">📋 AUDIT LOG</button>
+      </div>
+      <div class="filter-bar">
+        <span class="pill active" data-filter="ALL" onclick="setFilter('ALL')">ALL</span>
+        <span class="pill" data-filter="ACTIVE" onclick="setFilter('ACTIVE')">ACTIVE</span>
+        <span class="pill" data-filter="SUSPENDED" onclick="setFilter('SUSPENDED')">SUSPENDED</span>
+        <span class="pill" data-filter="ONLINE" onclick="setFilter('ONLINE')">ONLINE</span>
+        <span class="pill" data-filter="OFFLINE" onclick="setFilter('OFFLINE')">OFFLINE</span>
+        <input type="text" class="search-input" id="searchInput" placeholder="Search by username, model, device ID..." oninput="renderGrid()">
+      </div>
+    </section>
+
+    <!-- USER CARDS -->
+    <section>
+      <div class="section-header">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>
+        Managed Nodes
+      </div>
+      <div class="user-grid" id="userGrid"></div>
+    </section>
+  </main>
+
+  <footer><p>NEXUS C2 Master Plane © 2026. SECURE CONNECTION ESTABLISHED.</p></footer>
+</div>
+
+<!-- MODALS -->
+<div id="addUserModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 class="text-neon modal-title">DEPLOY NEW DEVICE</h3>
+    <form id="addUserForm">
+      <div class="input-group"><label>TARGET USERNAME</label><input type="text" id="newUsername" class="custom-input" required></div>
+      <div class="input-group"><label>INITIAL PASSKEY</label><input type="text" id="newPassword" class="custom-input" required></div>
+      <div class="flex" style="gap:1rem;margin-top:2rem;">
+        <button type="button" class="btn btn-red" onclick="closeModal('addUserModal')">CANCEL</button>
+        <button type="submit" class="btn btn-neon">DEPLOY</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="updatePasswordModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 class="text-blue modal-title" style="color:var(--neon-blue);border-color:var(--neon-blue);">MODIFY PASSKEY</h3>
+    <form id="updatePasswordForm">
+      <input type="hidden" id="updateTargetUser">
+      <div class="input-group"><label>NEW PASSKEY</label><input type="text" id="updatedPassword" class="custom-input" required></div>
+      <div class="flex" style="gap:1rem;margin-top:2rem;">
+        <button type="button" class="btn" onclick="closeModal('updatePasswordModal')">CANCEL</button>
+        <button type="submit" class="btn btn-blue">UPDATE KEY</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="notifyModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 class="modal-title" style="color:var(--neon-blue);border-color:var(--neon-blue);">TRANSMIT ALERT</h3>
+    <form id="notifyForm">
+      <input type="hidden" id="notifyTarget">
+      <div class="input-group"><label>PAYLOAD MESSAGE</label><input type="text" id="notifyMsg" class="custom-input" required></div>
+      <div class="flex" style="gap:1rem;margin-top:2rem;">
+        <button type="button" class="btn" onclick="closeModal('notifyModal')">CANCEL</button>
+        <button type="submit" class="btn btn-blue">TRANSMIT</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="suspendModal" class="modal-overlay hidden">
+  <div class="modal">
+    <h3 class="modal-title" style="color:var(--neon-red);border-color:var(--neon-red);">SUSPEND ACCOUNT</h3>
+    <form id="suspendForm">
+      <input type="hidden" id="suspendTargetUser">
+      <div class="input-group"><label>USERNAME</label><input type="text" id="suspendUserDisplay" class="custom-input" readonly></div>
+      <div class="input-group"><label>SUSPENSION REASON (optional)</label><textarea id="suspendReason" class="custom-input" rows="3" placeholder="Policy violation, abuse, ..."></textarea></div>
+      <div class="flex" style="gap:1rem;margin-top:2rem;">
+        <button type="button" class="btn" onclick="closeModal('suspendModal')">CANCEL</button>
+        <button type="submit" class="btn btn-red">SUSPEND</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="deviceDetailsModal" class="modal-overlay hidden">
+  <div class="modal wide">
+    <h3 class="modal-title text-blue"><span>DEVICE DETAILS</span><button onclick="closeModal('deviceDetailsModal')" style="background:none;border:none;color:var(--text-muted);font-size:1.5rem;cursor:pointer;">&times;</button></h3>
+    <div id="deviceDetailsBody"></div>
+  </div>
+</div>
+
+<div id="auditModal" class="modal-overlay hidden">
+  <div class="modal wide">
+    <h3 class="modal-title text-blue"><span>AUDIT LOG</span><button onclick="closeModal('auditModal')" style="background:none;border:none;color:var(--text-muted);font-size:1.5rem;cursor:pointer;">&times;</button></h3>
+    <div id="auditBody" style="font-size:.8rem;"></div>
+  </div>
+</div>
+
+<script>
+const API_URL = "./api";
+let authToken = localStorage.getItem('nexus_c2_token');
+let allUsers = {};
+let currentFilter = 'ALL';
+
+if (authToken) {
+  // Verify session still valid
+  fetch(`${API_URL}/admin/me`, { headers: { 'Authorization': authToken } })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success) {
+        document.getElementById('loginScreen').classList.add('hidden');
+        document.getElementById('dashboardScreen').classList.remove('hidden');
+        fetchUsers();
+      } else {
+        localStorage.removeItem('nexus_c2_token');
+        authToken = null;
+      }
+    })
+    .catch(() => { localStorage.removeItem('nexus_c2_token'); authToken = null; });
+}
+
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast');
+  const i = document.getElementById('toastIcon');
+  document.getElementById('toastMsg').innerText = msg;
+  if (isError) {
+    t.style.borderLeftColor = 'var(--neon-red)';
+    i.innerHTML = '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>';
+    i.style.stroke = 'var(--neon-red)';
+  } else {
+    t.style.borderLeftColor = 'var(--neon-green)';
+    i.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
+    i.style.stroke = 'var(--neon-green)';
+  }
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('btnLogin');
+  btn.innerHTML = 'AUTHENTICATING...';
+  try {
+    const res = await fetch(`${API_URL}/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('adminUser').value,
+        password: document.getElementById('adminPass').value
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      authToken = data.token;
+      localStorage.setItem('nexus_c2_token', authToken);
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('dashboardScreen').classList.remove('hidden');
+      showToast("Access Granted - Welcome Root");
+      fetchUsers();
+    } else {
+      showToast(data.message, true);
+    }
+  } catch (err) {
+    showToast("Server Connection Failed", true);
+  } finally {
+    btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg> INITIALIZE SECURE LINK';
+  }
+});
+
+function logout() {
+  fetch(`${API_URL}/admin/logout`, { method: 'POST', headers: { 'Authorization': authToken } }).catch(()=>{});
+  localStorage.removeItem('nexus_c2_token');
+  location.reload();
+}
+
+async function fetchUsers() {
+  try {
+    const res = await fetch(`${API_URL}/users`, { headers: { 'Authorization': authToken } });
+    const data = await res.json();
+    if (data.success) {
+      allUsers = data.data || {};
+      renderGrid();
+    } else {
+      if (data.message === "Unauthorized Access") logout();
+      showToast(data.message || data.error, true);
+    }
+  } catch (err) {
+    showToast("Failed to fetch node data", true);
+  }
+}
+
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.pill').forEach(p => p.classList.toggle('active', p.dataset.filter === f));
+  renderGrid();
+}
+
+function effectiveStatus(u) {
+  let s = (u.status || 'ACTIVE').toUpperCase();
+  if (u.is_blocked && s === 'ACTIVE') s = 'SUSPENDED';
+  return s;
+}
+
+function isOnline(u) {
+  if (!u.device) return false;
+  if (!u.device.online) return false;
+  // Stale after 3 minutes
+  const lastSeen = u.device.last_seen || 0;
+  return (Date.now() - lastSeen) < 3 * 60 * 1000;
+}
+
+function renderGrid() {
+  const grid = document.getElementById('userGrid');
+  grid.innerHTML = '';
+  const q = (document.getElementById('searchInput').value || '').toLowerCase().trim();
+
+  let total=0, active=0, suspended=0, disabled=0, online=0, offline=0, sessions=0, fcm=0;
+
+  for (const [username, info] of Object.entries(allUsers)) {
+    const status = effectiveStatus(info);
+    const onlineNow = isOnline(info);
+    total++;
+    if (status === 'ACTIVE') active++;
+    if (status === 'SUSPENDED') suspended++;
+    if (status === 'DISABLED') disabled++;
+    if (onlineNow) online++; else offline++;
+    if (info.session && info.session.active) sessions++;
+    if (info.device && info.device.fcm_token) fcm++;
+
+    // Filter
+    if (currentFilter === 'ACTIVE' && status !== 'ACTIVE') continue;
+    if (currentFilter === 'SUSPENDED' && status !== 'SUSPENDED') continue;
+    if (currentFilter === 'ONLINE' && !onlineNow) continue;
+    if (currentFilter === 'OFFLINE' && onlineNow) continue;
+
+    // Search
+    if (q) {
+      const model = (info.device?.model || '').toLowerCase();
+      const devId = (info.device?.device_id || '').toLowerCase();
+      if (!username.toLowerCase().includes(q) && !model.includes(q) && !devId.includes(q)) continue;
+    }
+
+    const fcmStatus = info.device?.fcm_token
+      ? '<span class="badge online">FCM SYNCED</span>'
+      : '<span class="badge offline">NO FCM</span>';
+    const sessionStatus = (info.session && info.session.active)
+      ? '<span class="badge online">SESSION ACTIVE</span>'
+      : '<span class="badge offline">NO SESSION</span>';
+    const onlineBadge = onlineNow
+      ? '<span class="badge online">● ONLINE</span>'
+      : '<span class="badge offline">● OFFLINE</span>';
+
+    const dev = info.device || {};
+    const firstSeen = dev.first_seen ? new Date(dev.first_seen).toLocaleString() : '—';
+    const lastSeen = dev.last_seen ? new Date(dev.last_seen).toLocaleString() : '—';
+
+    grid.innerHTML += `
+      <div class="user-card status-${status}">
+        <div class="card-header">
+          <div class="card-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+            ${username}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;">
+            <span class="badge status-${status}">${status}</span>
+            ${onlineBadge}
+          </div>
+        </div>
+        <div class="card-info">
+          <div class="info-row"><span class="info-label">Device:</span><span class="info-value">${dev.manufacturer || '—'} ${dev.model || ''}</span></div>
+          <div class="info-row"><span class="info-label">Android:</span><span class="info-value">${dev.android_version || '—'}</span></div>
+          <div class="info-row"><span class="info-label">App:</span><span class="info-value">${dev.app_version || '—'}</span></div>
+          <div class="info-row"><span class="info-label">Device ID:</span><span class="info-value mono">${maskId(dev.device_id)}</span></div>
+          <div class="info-row"><span class="info-label">First Seen:</span><span class="info-value">${firstSeen}</span></div>
+          <div class="info-row"><span class="info-label">Last Seen:</span><span class="info-value">${lastSeen}</span></div>
+          <div class="info-row"><span class="info-label">Session:</span><span class="info-value">${sessionStatus}</span></div>
+          <div class="info-row"><span class="info-label">FCM:</span><span class="info-value">${fcmStatus}</span></div>
+          ${info.suspension_reason ? `<div class="info-row"><span class="info-label">Reason:</span><span class="info-value text-red">${info.suspension_reason}</span></div>` : ''}
+        </div>
+        <div class="card-actions">
+          <button class="btn btn-blue" onclick="showDeviceDetails('${username}')">DETAILS</button>
+          <button class="btn btn-blue" onclick="openNotifyModal('${username}')">MESSAGE</button>
+          <button class="btn btn-amber" onclick="forceLogout('${username}')">FORCE LOGOUT</button>
+          ${status === 'SUSPENDED'
+            ? `<button class="btn btn-neon full-width" onclick="restoreUser('${username}')">RESTORE ACCESS</button>`
+            : `<button class="btn btn-red full-width" onclick="openSuspendModal('${username}')">SUSPEND</button>`}
+          <button class="btn" onclick="unbindDevice('${username}')">UNBIND DEVICE</button>
+          <button class="btn btn-red" onclick="deleteUser('${username}')">DELETE</button>
+        </div>
+      </div>
+    `;
+  }
+
+  if (Object.keys(allUsers).length === 0 || grid.innerHTML === '') {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:3rem;color:var(--text-muted);border:1px dashed var(--border);border-radius:var(--card-radius);">No matching nodes.</div>';
+  }
+
+  document.getElementById('statTotal').innerText = total;
+  document.getElementById('statActive').innerText = active;
+  document.getElementById('statSuspended').innerText = suspended;
+  document.getElementById('statDisabled').innerText = disabled;
+  document.getElementById('statOnline').innerText = online;
+  document.getElementById('statOffline').innerText = offline;
+  document.getElementById('statSessions').innerText = sessions;
+  document.getElementById('statFcm').innerText = fcm;
+}
+
+function maskId(id) {
+  if (!id) return '—';
+  if (id.length <= 8) return '********';
+  return id.substring(0,4) + '****' + id.substring(id.length-4);
+}
+
+async function apiRequest(endpoint, payload) {
+  try {
+    const res = await fetch(`${API_URL}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': authToken },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.success) { showToast(data.message); fetchUsers(); }
+    else { showToast(data.error || data.message, true); }
+  } catch (err) { showToast("Action failed", true); }
+}
+
+function forceLogout(username) {
+  if (confirm(`Send FORCE LOGOUT to ${username}? Active session will be revoked.`)) {
+    apiRequest('/admin/force-logout', { username });
+  }
+}
+function restoreUser(username) {
+  if (confirm(`RESTORE access for ${username}? User must log in again.`)) {
+    apiRequest('/admin/restore', { username });
+  }
+}
+function unbindDevice(username) {
+  if (confirm(`UNBIND device for ${username}? User will be able to log in from another device.`)) {
+    apiRequest('/admin/unbind-device', { username });
+  }
+}
+function deleteUser(username) {
+  const c = prompt(`CRITICAL: Permanently DELETE ${username}?\nType DELETE to confirm:`);
+  if (c === 'DELETE') apiRequest('/users/delete', { username });
+  else if (c !== null) showToast("Cancelled - confirmation mismatch", true);
+}
+
+function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+document.getElementById('addUserForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  apiRequest('/users/create', {
+    username: document.getElementById('newUsername').value,
+    password: document.getElementById('newPassword').value
+  });
+  closeModal('addUserModal');
+  e.target.reset();
+});
+
+function openUpdatePasswordModal(username) {
+  document.getElementById('updateTargetUser').value = username;
+  document.getElementById('updatedPassword').value = '';
+  openModal('updatePasswordModal');
+}
+document.getElementById('updatePasswordForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  apiRequest('/users/update-password', {
+    username: document.getElementById('updateTargetUser').value,
+    newPassword: document.getElementById('updatedPassword').value
+  });
+  closeModal('updatePasswordModal');
+  e.target.reset();
+});
+
+function openNotifyModal(username) {
+  document.getElementById('notifyTarget').value = username;
+  document.getElementById('notifyMsg').value = '';
+  openModal('notifyModal');
+}
+document.getElementById('notifyForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  apiRequest('/admin/notify', {
+    username: document.getElementById('notifyTarget').value,
+    message: document.getElementById('notifyMsg').value
+  });
+  closeModal('notifyModal');
+  e.target.reset();
+});
+
+function openSuspendModal(username) {
+  document.getElementById('suspendTargetUser').value = username;
+  document.getElementById('suspendUserDisplay').value = username;
+  document.getElementById('suspendReason').value = '';
+  openModal('suspendModal');
+}
+document.getElementById('suspendForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  apiRequest('/admin/suspend', {
+    username: document.getElementById('suspendTargetUser').value,
+    reason: document.getElementById('suspendReason').value
+  });
+  closeModal('suspendModal');
+  e.target.reset();
+});
+
+async function showDeviceDetails(username) {
+  try {
+    const res = await fetch(`${API_URL}/users/${username}`, { headers: { 'Authorization': authToken } });
+    const data = await res.json();
+    if (!data.success) { showToast(data.message || data.error, true); return; }
+    const u = data.data.user;
+    const audit = data.data.audit || [];
+    const dev = u.device || {};
+    const ses = u.session || {};
+    const body = document.getElementById('deviceDetailsBody');
+    body.innerHTML = `
+      <div class="detail-grid">
+        <div><div class="label">Account</div><div class="value">${username}</div></div>
+        <div><div class="label">Status</div><div class="value"><span class="badge status-${effectiveStatus(u)}">${effectiveStatus(u)}</span></div></div>
+        <div><div class="label">Manufacturer</div><div class="value">${dev.manufacturer || '—'}</div></div>
+        <div><div class="label">Model</div><div class="value">${dev.model || '—'}</div></div>
+        <div><div class="label">Android Version</div><div class="value">${dev.android_version || '—'}</div></div>
+        <div><div class="label">SDK</div><div class="value">${dev.sdk_version || '—'}</div></div>
+        <div><div class="label">App Version</div><div class="value">${dev.app_version || '—'}</div></div>
+        <div><div class="label">Device ID</div><div class="value mono">${dev.device_id || '—'}</div></div>
+        <div><div class="label">FCM</div><div class="value">${dev.fcm_token ? 'CONNECTED' : 'NOT SET'}</div></div>
+        <div><div class="label">Session</div><div class="value">${ses.active ? 'ACTIVE' : 'INACTIVE'}</div></div>
+        <div><div class="label">First Seen</div><div class="value">${dev.first_seen ? new Date(dev.first_seen).toLocaleString() : '—'}</div></div>
+        <div><div class="label">Last Seen</div><div class="value">${dev.last_seen ? new Date(dev.last_seen).toLocaleString() : '—'}</div></div>
+        <div><div class="label">Suspended Reason</div><div class="value">${u.suspension_reason || '—'}</div></div>
+        <div><div class="label">Suspended By</div><div class="value">${u.suspended_by || '—'}</div></div>
+        <div><div class="label">Suspended At</div><div class="value">${u.suspended_at ? new Date(u.suspended_at).toLocaleString() : '—'}</div></div>
+        <div><div class="label">Session Version</div><div class="value">${u.session_version || 0}</div></div>
+      </div>
+      <div class="timeline">
+        <div style="color:var(--text-muted);font-size:.75rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:.5rem;">Activity Timeline</div>
+        ${audit.length === 0 ? '<div class="timeline-item">No recent activity</div>' :
+          audit.map(a => `<div class="timeline-item">
+            <div class="action">${a.action} ${a.username || ''}</div>
+            <div class="ts">${new Date(a.timestamp).toLocaleString()} • by ${a.admin} ${a.reason ? '• ' + a.reason : ''}</div>
+          </div>`).join('')}
+      </div>
+    `;
+    openModal('deviceDetailsModal');
+  } catch (e) { showToast("Failed to load details", true); }
+}
+
+async function fetchAuditLog() {
+  try {
+    const res = await fetch(`${API_URL}/audit-log?limit=50`, { headers: { 'Authorization': authToken } });
+    const data = await res.json();
+    if (!data.success) { showToast(data.message || data.error, true); return; }
+    const list = data.data || [];
+    const body = document.getElementById('auditBody');
+    body.innerHTML = list.length === 0
+      ? '<div style="text-align:center;color:var(--text-muted);padding:2rem;">No audit entries yet.</div>'
+      : list.map(a => `<div class="timeline-item">
+          <div class="action">${a.action} ${a.username || ''}</div>
+          <div class="ts">${new Date(a.timestamp).toLocaleString()} • by ${a.admin} ${a.reason ? '• ' + a.reason : ''} • ${a.result}</div>
+        </div>`).join('');
+    openModal('auditModal');
+  } catch (e) { showToast("Failed to load audit log", true); }
+}
+
+// Auto-refresh every 30s
+setInterval(() => {
+  if (authToken && !document.getElementById('dashboardScreen').classList.contains('hidden')) {
+    fetchUsers();
+  }
+}, 30000);
+</script>
+</body>
+</html>
