@@ -1,0 +1,44 @@
+{
+  "rules": {
+    "users": {
+      "$username": {
+        ".read": "auth != null && auth.token.admin === true",
+        ".write": "auth != null && auth.token.admin === true",
+
+        "commands": {
+          "$cmdId": {
+            ".read": "auth != null && auth.token.admin === true",
+            ".write": "auth != null && auth.token.admin === true"
+          }
+        },
+
+        "session": {
+          ".read": "auth != null && auth.token.admin === true",
+          ".write": "auth != null && auth.token.admin === true"
+        },
+
+        "device": {
+          ".read": "auth != null && auth.token.admin === true",
+          ".write": "auth != null && auth.token.admin === true"
+        }
+      }
+    },
+
+    "audit_log": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": "auth != null && auth.token.admin === true"
+    },
+
+    "admin_sessions": {
+      "$token": {
+        ".read": "auth != null && auth.token.admin === true",
+        ".write": "auth != null && auth.token.admin === true"
+      }
+    },
+
+    "fcm_tokens": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": "auth != null && auth.token.admin === true"
+    }
+  }
+}
