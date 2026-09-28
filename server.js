@@ -1,3 +1,6 @@
+// Set process timezone explicitly to Indian Standard Time (IST) before loading anything
+process.env.TZ = 'Asia/Kolkata';
+
 const express = require('express');
 const admin = require('firebase-admin');
 const path = require('path');
@@ -13,9 +16,18 @@ app.use(express.json({ limit: '256kb', type: '*/*' }));
 app.use(express.urlencoded({ extended: true, limit: '256kb' }));
 app.use(cors());
 
+function getISTTimestampString(date = new Date()) {
+    return new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        dateStyle: 'medium',
+        timeStyle: 'medium',
+        hour12: true
+    }).format(date);
+}
+
 app.use((req, res, next) => {
     if (req.originalUrl.includes('/api/')) {
-        console.log(`[C2 DEBUG] ${req.method} ${req.originalUrl} | Body:`, JSON.stringify(req.body));
+        console.log(`[C2 DEBUG | ${getISTTimestampString()}] ${req.method} ${req.originalUrl} | Body:`, JSON.stringify(req.body));
     }
     next();
 });
@@ -44,10 +56,10 @@ try {
     db = admin.database();
     try { messaging = admin.messaging(); } catch (_) { messaging = null; }
     isFirebaseInitialized = true;
-    console.log(`[C2 Master Node] Firebase Admin SDK Initialized. DB: ${databaseURL}`);
+    console.log(`[C2 Master Node | ${getISTTimestampString()}] Firebase Admin SDK Initialized. DB: ${databaseURL}`);
 } catch (error) {
-    console.error("[C2 Master Node ERROR] Firebase init failed:", error.message);
-    console.warn("[C2 Master Node WARN] DEGRADED MODE.");
+    console.error(`[C2 Master Node ERROR | ${getISTTimestampString()}] Firebase init failed:`, error.message);
+    console.warn(`[C2 Master Node WARN | ${getISTTimestampString()}] DEGRADED MODE.`);
     db = {
         ref: () => ({
             once: async () => ({ val: () => ({}) }),
@@ -99,7 +111,6 @@ function extractPayload(body) {
     let d = body.device || body.deviceInfo;
     let online = body.online;
 
-    // 🔥 EDGE CASE FIX: If reverse proxy drops Content-Type, Express parses JSON string as Object Key
     if (!u && !p && !s && Object.keys(body).length === 1) {
         try {
             const parsed = JSON.parse(Object.keys(body)[0]);
@@ -152,9 +163,16 @@ async function revokeAdminSession(token) {
 
 async function auditLog(admin, action, username, deviceId, reason, result) {
     try {
+        const now = Date.now();
         await db.ref('audit_log').push({
-            admin: admin || 'unknown', action, username: username || '', device_id: deviceId || '',
-            timestamp: Date.now(), reason: reason || '', result: result || 'SUCCESS'
+            admin: admin || 'unknown',
+            action,
+            username: username || '',
+            device_id: deviceId || '',
+            timestamp: now,
+            ist_time: getISTTimestampString(new Date(now)),
+            reason: reason || '',
+            result: result || 'SUCCESS'
         });
     } catch (e) { console.error('[audit] failed', e.message); }
 }
@@ -201,7 +219,7 @@ app.get('/api/admin/me', checkFirebase, async (req, res) => {
     const token = req.headers['authorization'];
     const s = await verifyAdminSession(token);
     if (!s) return res.status(403).json({ success: false, message: "Unauthorized" });
-    res.json({ success: true, username: s.username, expires_at: s.expires_at });
+    res.json({ success: true, username: s.username, expires_at: s.expires_at, timezone: 'Asia/Kolkata (IST)' });
 });
 
 const verifyAdmin = async (req, res, next) => {
@@ -432,7 +450,7 @@ app.post('/api/auth/login', checkFirebase, async (req, res) => {
     const { username, password, device } = extractPayload(req.body);
     
     if (!isValidUsername(username) || !isValidPassword(password)) {
-        console.log("❌ LOGIN REJECTED: Invalid input. Missing Keys in Body.");
+        console.log(`[C2 AUTH | ${getISTTimestampString()}] ❌ LOGIN REJECTED: Missing credentials.`);
         return res.status(400).json({ success: false, message: `Debug: Invalid input. Got Username: '${username}', Password: '${password ? "***" : "empty"}'`, received_body: req.body });
     }
 
@@ -471,10 +489,10 @@ app.post('/api/auth/login', checkFirebase, async (req, res) => {
 
         await auditLog(username, 'USER_LOGIN', username, deviceId || '', '', 'SUCCESS');
         
-        console.log("✅ LOGIN SUCCESS!");
+        console.log(`[C2 AUTH | ${getISTTimestampString()}] ✅ LOGIN SUCCESS: ${username} (Device: ${deviceId || 'N/A'})`);
         res.json({ success: true, status: 'ACTIVE', session_id: sessionId, session_version: nextSessionVersion, device_id: deviceId });
     } catch (e) {
-        console.log("❌ LOGIN FATAL ERROR:", e.message);
+        console.log(`[C2 AUTH ERROR | ${getISTTimestampString()}] ❌ LOGIN FATAL:`, e.message);
         res.status(500).json({ success: false, error: e.message });
     }
 });
@@ -508,7 +526,7 @@ app.post('/api/device/heartbeat', checkFirebase, async (req, res) => {
         const now = Date.now();
         await db.ref(`users/${username}/device`).update({ last_seen: now, online: online !== false });
         if (session_id) await db.ref(`users/${username}/session/last_verified_at`).set(now);
-        res.json({ success: true, time: now });
+        res.json({ success: true, time: now, ist_time: getISTTimestampString(new Date(now)) });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
@@ -542,7 +560,16 @@ app.get('/api/commands/pending', checkFirebase, async (req, res) => {
 });
 
 async function pushCommand(username, type, payload) {
-    try { await db.ref(`users/${username}/commands`).push({ type, payload: payload || '', timestamp: Date.now(), delivered: false }); } catch (e) { console.error('[pushCommand]', e.message); }
+    try {
+        const now = Date.now();
+        await db.ref(`users/${username}/commands`).push({
+            type,
+            payload: payload || '',
+            timestamp: now,
+            ist_time: getISTTimestampString(new Date(now)),
+            delivered: false
+        });
+    } catch (e) { console.error('[pushCommand]', e.message); }
 }
 
 async function tryFcm(username, data) {
@@ -555,4 +582,6 @@ async function tryFcm(username, data) {
 }
 
 const PORT = process.env.PORT || 4004;
-app.listen(PORT, () => { console.log(`[C2 Master Node] Secure panel running at port ${PORT}`); });
+app.listen(PORT, () => {
+    console.log(`[C2 Master Node | ${getISTTimestampString()}] Secure panel running at port ${PORT} (Timezone: Asia/Kolkata)`);
+});
