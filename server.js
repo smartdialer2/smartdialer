@@ -181,18 +181,14 @@ async function migrateLegacyUser(username, user) {
     return user;
 }
 
-// ============================================================
-// ADMIN ROUTES
-// ============================================================
+// Admin API Endpoints
 app.post('/api/admin/login', checkFirebase, async (req, res) => {
     const { username, password } = extractPayload(req.body);
     const masterUser = (process.env.ADMIN_USERNAME || '').toLowerCase();
     const masterHash = process.env.ADMIN_PASSWORD_HASH;
     const masterPlain = process.env.ADMIN_PASSWORD;
 
-    if (!masterUser || (!masterHash && !masterPlain)) {
-        return res.status(500).json({ success: false, message: "Admin credentials not configured." });
-    }
+    if (!masterUser || (!masterHash && !masterPlain)) return res.status(500).json({ success: false, message: "Admin credentials not configured." });
     if (username !== masterUser) return res.status(401).json({ success: false, message: "Invalid Admin Credentials" });
 
     let ok = false;
@@ -238,7 +234,7 @@ app.get('/api/users', verifyAdmin, checkFirebase, async (req, res) => {
                 password: undefined,
                 password_hash: undefined,
                 stats: info.stats || { genuine_calls: 0, fake_calls: 0, genuine_seconds: 0, fake_seconds: 0 },
-                fake_calls: info.fake_calls || {}
+                call_logs: info.call_logs || {}
             };
         }
         res.json({ success: true, data: sanitized });
@@ -255,12 +251,8 @@ app.get('/api/users/:username', verifyAdmin, checkFirebase, async (req, res) => 
         delete user.password;
         delete user.password_hash;
         user.stats = user.stats || { genuine_calls: 0, fake_calls: 0, genuine_seconds: 0, fake_seconds: 0 };
-        user.fake_calls = user.fake_calls || {};
-
-        const auditSnap = await db.ref('audit_log').orderByChild('username').equalTo(u).limitToLast(15).once('value');
-        const audit = [];
-        auditSnap.forEach(cs => { audit.push(cs.val()); });
-        res.json({ success: true, data: { user, audit: audit.reverse() } });
+        user.call_logs = user.call_logs || {};
+        res.json({ success: true, data: { user } });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
@@ -277,12 +269,7 @@ app.post('/api/users/create', verifyAdmin, checkFirebase, async (req, res) => {
             status: 'ACTIVE',
             is_blocked: false,
             force_logout: false,
-            fcm_token: '',
-            device_binding_enabled: false,
             session_version: 0,
-            suspension_reason: '',
-            suspended_at: 0,
-            suspended_by: '',
             stats: { genuine_calls: 0, fake_calls: 0, genuine_seconds: 0, fake_seconds: 0 }
         });
         await auditLog(req.adminUser, 'CREATE_ACCOUNT', username, '', '', 'SUCCESS');
@@ -330,11 +317,9 @@ app.post('/api/admin/suspend', verifyAdmin, checkFirebase, async (req, res) => {
             is_blocked: true,
             suspension_reason: reason || 'Suspended by admin',
             suspended_at: Date.now(),
-            suspended_by: req.adminUser,
             force_logout: true,
             session_version: nextSessionVersion
         });
-        if (u.session && u.session.session_id) await db.ref(`users/${username}/session`).update({ active: false });
         await pushCommand(username, 'SUSPEND_ACCOUNT', reason || 'Suspended by admin');
         await auditLog(req.adminUser, 'SUSPEND', username, u.device?.device_id || '', reason || '', 'SUCCESS');
         res.json({ success: true, message: `User ${username} suspended.` });
@@ -352,8 +337,6 @@ app.post('/api/admin/restore', verifyAdmin, checkFirebase, async (req, res) => {
             status: 'ACTIVE',
             is_blocked: false,
             suspension_reason: '',
-            suspended_at: 0,
-            suspended_by: '',
             force_logout: false,
             session_version: nextSessionVersion
         });
@@ -371,7 +354,6 @@ app.post('/api/admin/force-logout', verifyAdmin, checkFirebase, async (req, res)
         if (!u) return res.status(404).json({ success: false, message: "User not found" });
         const nextSessionVersion = (u.session_version || 0) + 1;
         await db.ref(`users/${username}`).update({ force_logout: true, session_version: nextSessionVersion });
-        if (u.session && u.session.session_id) await db.ref(`users/${username}/session`).update({ active: false });
         await pushCommand(username, 'LOGOUT_NOW', '');
         await auditLog(req.adminUser, 'FORCE_LOGOUT', username, u.device?.device_id || '', '', 'SUCCESS');
         res.json({ success: true, message: `Force logout sent to ${username}` });
@@ -395,25 +377,13 @@ app.post('/api/admin/notify', verifyAdmin, checkFirebase, async (req, res) => {
         const alertMsg = message || 'Alert from Admin';
         await pushCommand(username, 'SHOW_MESSAGE', alertMsg);
         await auditLog(req.adminUser, 'SEND_MESSAGE', username, '', alertMsg, 'SUCCESS');
-        console.log(`[C2 NOTIFY | ${getISTTimestampString()}] Alert queued for ${username}: "${alertMsg}"`);
         res.json({ success: true, message: "Alert sent successfully" });
-    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
-});
-
-app.post('/api/admin/send-command', verifyAdmin, checkFirebase, async (req, res) => {
-    const { username, type, payload } = extractPayload(req.body);
-    if (!isValidUsername(username)) return res.status(400).json({ success: false, message: "Invalid username" });
-    try {
-        await pushCommand(username, type, payload || '');
-        await auditLog(req.adminUser, 'SEND_COMMAND', username, '', `${type}:${payload || ''}`, 'SUCCESS');
-        res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 app.get('/api/audit-log', verifyAdmin, checkFirebase, async (req, res) => {
     try {
-        const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
-        const snap = await db.ref('audit_log').orderByChild('timestamp').limitToLast(limit).once('value');
+        const snap = await db.ref('audit_log').orderByChild('timestamp').limitToLast(50).once('value');
         const list = [];
         snap.forEach(cs => { list.push({ id: cs.key, ...cs.val() }); });
         list.reverse();
@@ -422,13 +392,13 @@ app.get('/api/audit-log', verifyAdmin, checkFirebase, async (req, res) => {
 });
 
 // ============================================================
-// APP-FACING: CALL REPORTING & JANAM KUNDALI TELEMETRY
+// APP TELEMETRY: RECORDS BOTH GENUINE & FAKE RECENT CALLS
 // ============================================================
 app.post('/api/call/report', checkFirebase, async (req, res) => {
     const data = extractPayload(req.body);
     const username = data.username;
     const callType = (req.body.call_type || 'GENUINE').toUpperCase();
-    const number = req.body.number || '';
+    const number = req.body.number || 'Unknown';
     const duration = parseInt(req.body.duration || '0', 10);
     const simSlot = parseInt(req.body.sim_slot || '1', 10);
     const now = Date.now();
@@ -453,26 +423,25 @@ app.post('/api/call/report', checkFirebase, async (req, res) => {
         }
         await userRef.child('stats').set(stats);
 
-        // Record fake call history entry
-        if (callType === 'FAKE') {
-            await userRef.child('fake_calls').push({
-                number,
-                duration,
-                sim_slot: simSlot,
-                timestamp: now,
-                ist_time: getISTTimestampString(new Date(now))
-            });
-        }
+        // Store into universal recent call_logs list for Admin app
+        await userRef.child('call_logs').push({
+            type: callType,
+            number,
+            duration,
+            sim_slot: simSlot,
+            timestamp: now,
+            ist_time: getISTTimestampString(new Date(now))
+        });
 
-        // Live heartbeat bump
         await userRef.child('device').update({ last_seen: now, online: true });
-        console.log(`[C2 TELEMETRY | ${getISTTimestampString()}] ${callType} Call logged for ${username}: ${number} (${duration}s)`);
-        res.json({ success: true, message: "Call telemetry saved", stats });
+        console.log(`[C2 TELEMETRY | ${getISTTimestampString()}] ${callType} Call recorded for ${username}: ${number} (${duration}s)`);
+        res.json({ success: true, message: "Call logged successfully", stats });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
 });
 
+// App Session Management
 app.post('/api/auth/login', checkFirebase, async (req, res) => {
     const { username, password, device } = extractPayload(req.body);
     if (!isValidUsername(username) || !isValidPassword(password)) {
@@ -488,7 +457,6 @@ app.post('/api/auth/login', checkFirebase, async (req, res) => {
                 password_hash: hash,
                 status: 'ACTIVE',
                 session_version: 1,
-                device_binding_enabled: false,
                 stats: { genuine_calls: 0, fake_calls: 0, genuine_seconds: 0, fake_seconds: 0 }
             };
             await db.ref(`users/${username}`).set(user);
@@ -506,10 +474,7 @@ app.post('/api/auth/login', checkFirebase, async (req, res) => {
         if (!pwOk) return res.status(401).json({ success: false, message: "Invalid credentials" });
 
         const status = (user.status || 'ACTIVE').toUpperCase();
-        if (status === 'SUSPENDED') return res.json({ success: true, status: 'SUSPENDED', suspension_reason: user.suspension_reason || '', session_id: null });
-        if (status === 'DISABLED') return res.json({ success: true, status: 'DISABLED', session_id: null });
-        if (status === 'REVOKED') return res.json({ success: true, status: 'REVOKED', session_id: null });
-        if (status !== 'ACTIVE') return res.status(403).json({ success: false, message: "Account not active" });
+        if (status !== 'ACTIVE') return res.status(403).json({ success: false, message: "Account not active: " + status });
 
         const sessionId = crypto.randomBytes(24).toString('hex');
         const now = Date.now();
@@ -523,7 +488,6 @@ app.post('/api/auth/login', checkFirebase, async (req, res) => {
         await db.ref(`users/${username}/session`).set(sessionObj);
         await db.ref(`users/${username}/device`).set(deviceObj);
 
-        await auditLog(username, 'USER_LOGIN', username, deviceId, '', 'SUCCESS');
         res.json({ success: true, status: 'ACTIVE', session_id: sessionId, session_version: nextSessionVersion, device_id: deviceId });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
@@ -540,22 +504,16 @@ app.post('/api/session/validate', checkFirebase, async (req, res) => {
 
         let user = await getUser(username);
         if (!user) return res.json({ success: true, status: 'REVOKED', session_valid: false, device_valid: false });
-        user = await migrateLegacyUser(username, user);
         const status = (user.status || 'ACTIVE').toUpperCase();
-        const effectiveStatus = (user.is_blocked && status === 'ACTIVE') ? 'SUSPENDED' : status;
-
         const session = user.session || {};
         const sessionValid = !!session.active && session.session_id === session_id;
-        const deviceValid = true;
 
         if (sessionValid) {
             await db.ref(`users/${username}/session/last_verified_at`).set(now);
             await db.ref(`users/${username}/device`).update({ last_seen: now, online: true });
         }
 
-        const response = { success: true, status: effectiveStatus, session_valid: sessionValid, device_valid: deviceValid, suspension_reason: user.suspension_reason || '' };
-        if (effectiveStatus !== 'ACTIVE' || !sessionValid) response.session_id = null;
-        res.json(response);
+        res.json({ success: true, status, session_valid: sessionValid, device_valid: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
@@ -567,24 +525,6 @@ app.post('/api/device/heartbeat', checkFirebase, async (req, res) => {
         await db.ref(`users/${username}/device`).update({ last_seen: now, online: true });
         if (session_id) await db.ref(`users/${username}/session/last_verified_at`).set(now);
         res.json({ success: true, time: now, ist_time: getISTTimestampString(new Date(now)) });
-    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
-});
-
-app.post('/api/device/register', checkFirebase, async (req, res) => {
-    const { username, session_id, device } = extractPayload(req.body);
-    if (!isValidUsername(username) || !device) return res.status(400).json({ success: false, message: "Invalid input" });
-    try {
-        const existing = await getUser(username);
-        const now = Date.now();
-        const merged = {
-            ...(device || {}),
-            session_id: session_id || (existing?.session?.session_id || ''),
-            online: true,
-            last_seen: now,
-            first_seen: existing?.device?.first_seen || now
-        };
-        await db.ref(`users/${username}/device`).update(merged);
-        res.json({ success: true });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
