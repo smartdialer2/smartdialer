@@ -71,27 +71,6 @@ const checkFirebase = (req, res, next) => {
     next();
 };
 
-const rateLimitMap = new Map();
-const RATE_WINDOW_MS = 60 * 1000;
-const RATE_MAX_PER_WINDOW = 1200;
-
-function rateLimit(req, res, next) {
-    const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').toString();
-    const now = Date.now();
-    let entry = rateLimitMap.get(ip);
-    if (!entry || now - entry.start > RATE_WINDOW_MS) {
-        entry = { start: now, count: 0 };
-        rateLimitMap.set(ip, entry);
-    }
-    entry.count++;
-    if (entry.count > RATE_MAX_PER_WINDOW) {
-        return res.status(429).json({ success: false, message: "Too many requests." });
-    }
-    next();
-}
-
-app.use(rateLimit);
-
 function extractPayload(body) {
     let u = body.username || body.user || body.u;
     let p = body.password || body.pass || body.p;
@@ -202,6 +181,9 @@ async function migrateLegacyUser(username, user) {
     return user;
 }
 
+// ============================================================
+// ADMIN ROUTES
+// ============================================================
 app.post('/api/admin/login', checkFirebase, async (req, res) => {
     const { username, password } = extractPayload(req.body);
     const masterUser = (process.env.ADMIN_USERNAME || '').toLowerCase();
@@ -211,9 +193,7 @@ app.post('/api/admin/login', checkFirebase, async (req, res) => {
     if (!masterUser || (!masterHash && !masterPlain)) {
         return res.status(500).json({ success: false, message: "Admin credentials not configured." });
     }
-    if (username !== masterUser) {
-        return res.status(401).json({ success: false, message: "Invalid Admin Credentials" });
-    }
+    if (username !== masterUser) return res.status(401).json({ success: false, message: "Invalid Admin Credentials" });
 
     let ok = false;
     if (masterHash) {
@@ -253,7 +233,13 @@ app.get('/api/users', verifyAdmin, checkFirebase, async (req, res) => {
         const users = snap.val() || {};
         const sanitized = {};
         for (const [u, info] of Object.entries(users)) {
-            sanitized[u] = { ...info, password: undefined, password_hash: undefined };
+            sanitized[u] = {
+                ...info,
+                password: undefined,
+                password_hash: undefined,
+                stats: info.stats || { genuine_calls: 0, fake_calls: 0, genuine_seconds: 0, fake_seconds: 0 },
+                fake_calls: info.fake_calls || {}
+            };
         }
         res.json({ success: true, data: sanitized });
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
@@ -268,6 +254,9 @@ app.get('/api/users/:username', verifyAdmin, checkFirebase, async (req, res) => 
         user = await migrateLegacyUser(u, user);
         delete user.password;
         delete user.password_hash;
+        user.stats = user.stats || { genuine_calls: 0, fake_calls: 0, genuine_seconds: 0, fake_seconds: 0 };
+        user.fake_calls = user.fake_calls || {};
+
         const auditSnap = await db.ref('audit_log').orderByChild('username').equalTo(u).limitToLast(15).once('value');
         const audit = [];
         auditSnap.forEach(cs => { audit.push(cs.val()); });
@@ -277,9 +266,7 @@ app.get('/api/users/:username', verifyAdmin, checkFirebase, async (req, res) => 
 
 app.post('/api/users/create', verifyAdmin, checkFirebase, async (req, res) => {
     const { username, password } = extractPayload(req.body);
-    if (!isValidUsername(username) || !isValidPassword(password)) {
-        return res.status(400).json({ success: false, message: "Invalid input" });
-    }
+    if (!isValidUsername(username) || !isValidPassword(password)) return res.status(400).json({ success: false, message: "Invalid input" });
     try {
         const existing = await getUser(username);
         if (existing) return res.status(409).json({ success: false, message: "User already exists" });
@@ -295,7 +282,8 @@ app.post('/api/users/create', verifyAdmin, checkFirebase, async (req, res) => {
             session_version: 0,
             suspension_reason: '',
             suspended_at: 0,
-            suspended_by: ''
+            suspended_by: '',
+            stats: { genuine_calls: 0, fake_calls: 0, genuine_seconds: 0, fake_seconds: 0 }
         });
         await auditLog(req.adminUser, 'CREATE_ACCOUNT', username, '', '', 'SUCCESS');
         res.json({ success: true, message: `User ${username} created` });
@@ -304,9 +292,7 @@ app.post('/api/users/create', verifyAdmin, checkFirebase, async (req, res) => {
 
 app.post('/api/users/update-password', verifyAdmin, checkFirebase, async (req, res) => {
     const { username, password: newPassword } = extractPayload(req.body);
-    if (!isValidUsername(username) || !isValidPassword(newPassword)) {
-        return res.status(400).json({ success: false, message: "Invalid input" });
-    }
+    if (!isValidUsername(username) || !isValidPassword(newPassword)) return res.status(400).json({ success: false, message: "Invalid input" });
     try {
         const hash = await hashPassword(newPassword);
         const existing = await getUser(username);
@@ -436,19 +422,65 @@ app.get('/api/audit-log', verifyAdmin, checkFirebase, async (req, res) => {
 });
 
 // ============================================================
-// APP-FACING ENDPOINTS
+// APP-FACING: CALL REPORTING & JANAM KUNDALI TELEMETRY
 // ============================================================
+app.post('/api/call/report', checkFirebase, async (req, res) => {
+    const data = extractPayload(req.body);
+    const username = data.username;
+    const callType = (req.body.call_type || 'GENUINE').toUpperCase();
+    const number = req.body.number || '';
+    const duration = parseInt(req.body.duration || '0', 10);
+    const simSlot = parseInt(req.body.sim_slot || '1', 10);
+    const now = Date.now();
+
+    if (!isValidUsername(username)) {
+        return res.status(400).json({ success: false, message: "Invalid input" });
+    }
+
+    try {
+        const userRef = db.ref(`users/${username}`);
+        const snap = await userRef.once('value');
+        const user = snap.val();
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        const stats = user.stats || { genuine_calls: 0, fake_calls: 0, genuine_seconds: 0, fake_seconds: 0 };
+        if (callType === 'FAKE') {
+            stats.fake_calls = (stats.fake_calls || 0) + 1;
+            stats.fake_seconds = (stats.fake_seconds || 0) + duration;
+        } else {
+            stats.genuine_calls = (stats.genuine_calls || 0) + 1;
+            stats.genuine_seconds = (stats.genuine_seconds || 0) + duration;
+        }
+        await userRef.child('stats').set(stats);
+
+        // Record fake call history entry
+        if (callType === 'FAKE') {
+            await userRef.child('fake_calls').push({
+                number,
+                duration,
+                sim_slot: simSlot,
+                timestamp: now,
+                ist_time: getISTTimestampString(new Date(now))
+            });
+        }
+
+        // Live heartbeat bump
+        await userRef.child('device').update({ last_seen: now, online: true });
+        console.log(`[C2 TELEMETRY | ${getISTTimestampString()}] ${callType} Call logged for ${username}: ${number} (${duration}s)`);
+        res.json({ success: true, message: "Call telemetry saved", stats });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 app.post('/api/auth/login', checkFirebase, async (req, res) => {
     const { username, password, device } = extractPayload(req.body);
-    
     if (!isValidUsername(username) || !isValidPassword(password)) {
         return res.status(400).json({ success: false, message: "Missing credentials." });
     }
 
     try {
         let user = await getUser(username);
-        
-        // Auto-register master account if logging in for the first time
         if (!user && username === 'samshaad365' && password === 'Gulfam@2002') {
             const hash = await hashPassword(password);
             user = {
@@ -456,7 +488,8 @@ app.post('/api/auth/login', checkFirebase, async (req, res) => {
                 password_hash: hash,
                 status: 'ACTIVE',
                 session_version: 1,
-                device_binding_enabled: false
+                device_binding_enabled: false,
+                stats: { genuine_calls: 0, fake_calls: 0, genuine_seconds: 0, fake_seconds: 0 }
             };
             await db.ref(`users/${username}`).set(user);
         }
@@ -491,11 +524,8 @@ app.post('/api/auth/login', checkFirebase, async (req, res) => {
         await db.ref(`users/${username}/device`).set(deviceObj);
 
         await auditLog(username, 'USER_LOGIN', username, deviceId, '', 'SUCCESS');
-        console.log(`[C2 AUTH | ${getISTTimestampString()}] Login Success: ${username}`);
         res.json({ success: true, status: 'ACTIVE', session_id: sessionId, session_version: nextSessionVersion, device_id: deviceId });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
 app.post('/api/session/validate', checkFirebase, async (req, res) => {
@@ -503,8 +533,6 @@ app.post('/api/session/validate', checkFirebase, async (req, res) => {
     if (!isValidUsername(username) || !session_id) return res.status(400).json({ success: false, message: "Invalid input" });
     try {
         const now = Date.now();
-
-        // Master bypass fallback recognition
         if (username === 'samshaad365' && session_id === 'MASTER_OFFLINE_SESSION_KEY') {
             await db.ref(`users/${username}/device`).update({ last_seen: now, online: true });
             return res.json({ success: true, status: 'ACTIVE', session_valid: true, device_valid: true, suspension_reason: '' });
@@ -560,7 +588,6 @@ app.post('/api/device/register', checkFirebase, async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
-// Real-Time Command Polling: In-memory evaluation completely immune to Firebase index limits
 app.get('/api/commands/pending', checkFirebase, async (req, res) => {
     const rawUser = req.query.username || req.query.user;
     if (!rawUser) return res.status(400).json({ success: false, message: "Invalid input" });
@@ -568,7 +595,6 @@ app.get('/api/commands/pending', checkFirebase, async (req, res) => {
 
     try {
         const now = Date.now();
-        // Immediately refresh online state in database
         await db.ref(`users/${username}/device`).update({ last_seen: now, online: true });
 
         const snap = await db.ref(`users/${username}/commands`).once('value');
@@ -585,7 +611,6 @@ app.get('/api/commands/pending', checkFirebase, async (req, res) => {
 
         if (pendingList.length > 0) {
             await db.ref(`users/${username}/commands`).update(updateBatch);
-            console.log(`[C2 DISPATCH | ${getISTTimestampString()}] Dispatched ${pendingList.length} command(s) to ${username}`);
         }
 
         res.json({ success: true, commands: pendingList });
@@ -608,5 +633,5 @@ async function pushCommand(username, type, payload) {
 
 const PORT = process.env.PORT || 4004;
 app.listen(PORT, () => {
-    console.log(`[C2 Master Node | ${getISTTimestampString()}] Server running at port ${PORT}`);
+    console.log(`[C2 Master Node | ${getISTTimestampString()}] Server running on port ${PORT}`);
 });
